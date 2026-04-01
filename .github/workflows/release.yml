@@ -54,7 +54,6 @@ jobs:
           echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
           SYSROOT=$(find "$SDK_DIR" -maxdepth 3 -type d -name "sysroot" | head -1)
           echo "SYSROOT=$SYSROOT" >> $GITHUB_ENV
-          # PBNJSON stub készítése a build-hez
           if ! find "$SYSROOT" -name "pbnjson_c.pc" 2>/dev/null | grep -q .; then
             mkdir -p "$SYSROOT/usr/lib/pkgconfig"
             printf 'prefix=/usr\nexec_prefix=${prefix}\nlibdir=${exec_prefix}/lib\nincludedir=${prefix}/include\nName: pbnjson_c\nDescription: pbnjson stub\nVersion: 1.0\nLibs: -L${libdir} -lpbnjson_c\nCflags: -I${includedir}\n' > "$SYSROOT/usr/lib/pkgconfig/pbnjson_c.pc"
@@ -68,32 +67,46 @@ jobs:
         run: |
           sed -i 's/arm-webos-linux-gnueabi-/arm-lgtv-linux-gnueabi-/g' cmake/PackageWebOS.cmake
 
-      - name: Configure and Build
+      - name: Configure and Patch Opus
         run: |
           TOOLCHAIN_FILE=$(find "$SDK_DIR" -name "toolchainfile.cmake" | head -1)
           mkdir -p build
           
-          # Közvetlen CMake hívás az Opus NEON tiltásával és a helyes flag-ekkel
+          # 1. Először csak konfigurálunk, hogy a CMake letöltse az Opus-t
           cmake -Bbuild \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
             -DTARGET_WEBOS=ON \
             -DBUILD_TESTS=OFF \
             -DOPUS_WITH_NEON=OFF \
             -DOPUS_USE_NEON=OFF \
-            -DCMAKE_C_FLAGS="-mfpu=vfp -mfloat-abi=softfp" \
-            -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+            -DCMAKE_BUILD_TYPE=$BUILD_TYPE || true
           
+          # 2. BRUTÁLIS PATCH: Töröljük az összes ARM/NEON fájlt az Opus forrásából, 
+          # hogy a build rendszer ne is próbálja meg fordítani őket.
+          echo "Patching Opus source to remove ARM/NEON files..."
+          find build/ext_opus-prefix -name "*arm*" -exec rm -rf {} +
+          find build/ext_opus-prefix -name "*neon*" -exec rm -rf {} +
+          
+          # 3. Újrakonfigurálunk, hogy a CMake észrevegye a változást
+          cmake -Bbuild \
+            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
+            -DTARGET_WEBOS=ON \
+            -DBUILD_TESTS=OFF \
+            -DOPUS_WITH_NEON=OFF \
+            -DOPUS_USE_NEON=OFF \
+            -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+
+      - name: Build
+        run: |
           cmake --build build --parallel $(nproc)
 
       - name: Package IPK
         run: |
-          # Létrehozzuk a dist mappát a kimenetnek
           mkdir -p dist
-          
-          # Csomagolás. Feltételezzük, hogy az appinfo.json az 'app' mappában van.
-          # Ha a projekt gyökerében van, akkor a 'build' helyett '.' kell.
-          # Az ares-package a build könyvtár tartalmát csomagolja be.
-          ares-package build/app -o dist/ || ares-package build -o dist/
+          # Megpróbáljuk megkeresni az app könyvtárat a builden belül
+          APP_PATH=$(find build -name "appinfo.json" -exec dirname {} \; | head -n 1)
+          if [ -z "$APP_PATH" ]; then APP_PATH="build"; fi
+          ares-package "$APP_PATH" -o dist/
 
       - name: Upload IPK artifact
         uses: actions/upload-artifact@v4
