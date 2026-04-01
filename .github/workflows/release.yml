@@ -18,93 +18,27 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y qemu-user-static binfmt-support libc6-arm64-cross libwayland-dev wayland-protocols pkg-config
-          echo "QEMU_LD_PREFIX=/usr/aarch64-linux-gnu" >> $GITHUB_ENV
-
-      - name: Install ares-package
-        run: |
-          ARES_URL=$(curl -s https://api.github.com/repos/webosbrew/ares-cli-rs/releases/latest \
-            | grep "browser_download_url" \
-            | grep "ares-package.*\.deb" \
-            | cut -d '"' -f 4 \
-            | head -1)
-          curl -L "$ARES_URL" -o /tmp/ares-package.deb
-          sudo apt install -y /tmp/ares-package.deb
-
       - name: Download webOS NDK
-        run: |
-          NDK_URL=$(curl -s https://api.github.com/repos/openlgtv/buildroot-nc4/releases/latest \
-            | grep "browser_download_url" \
-            | grep "\.tar\.gz" \
-            | cut -d '"' -f 4 \
-            | head -1)
-          curl -L "$NDK_URL" -o /tmp/webos-sdk.tar.gz
+        uses: robinraju/release-downloader@v1.9
+        with:
+          repository: "openlgtv/buildroot-nc4"
+          latest: true
+          fileName: "arm-webos-linux-gnueabi_sdk-buildroot.tar.gz"
+          out-file-path: "/tmp"
 
       - name: Extract and relocate webOS NDK
+        shell: bash
+        working-directory: /tmp
         run: |
-          cd /tmp
-          tar xzf webos-sdk.tar.gz
-          SDK_DIR=$(find /tmp -maxdepth 1 -type d \( -name "*sdk-buildroot*" -o -name "*sdk*buildroot*" \) | head -1)
-          "$SDK_DIR/relocate-sdk.sh"
-          echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
-          SYSROOT=$(find "$SDK_DIR" -maxdepth 3 -type d -name "sysroot" | head -1)
-          echo "SYSROOT=$SYSROOT" >> $GITHUB_ENV
+          tar xzf arm-webos-linux-gnueabi_sdk-buildroot.tar.gz
+          ./arm-webos-linux-gnueabi_sdk-buildroot/relocate-sdk.sh
 
-          if ! find "$SYSROOT" -name "pbnjson_c.pc" 2>/dev/null | grep -q .; then
-            mkdir -p "$SYSROOT/usr/lib/pkgconfig"
-            printf 'prefix=/usr\nexec_prefix=${prefix}\nlibdir=${exec_prefix}/lib\nincludedir=${prefix}/include\nName: pbnjson_c\nDescription: pbnjson stub\nVersion: 1.0\nLibs: -L${libdir} -lpbnjson_c\nCflags: -I${includedir}\n' > "$SYSROOT/usr/lib/pkgconfig/pbnjson_c.pc"
-            echo "void pbnjson_stub(){}" > /tmp/pbnjson_stub.c
-            "$SDK_DIR/bin/arm-lgtv-linux-gnueabi-gcc" -shared -o "$SYSROOT/usr/lib/libpbnjson_c.so" /tmp/pbnjson_stub.c || true
-          fi
+      - name: Build
+        env:
+          TOOLCHAIN_FILE: /tmp/arm-webos-linux-gnueabi_sdk-buildroot/usr/share/buildroot/toolchainfile.cmake
+        run: ./tools/webos/easy_build.sh -DCMAKE_BUILD_TYPE=$BUILD_TYPE
 
-      - name: Fix PackageWebOS.cmake architecture detection
-        run: |
-          if [ -f "cmake/PackageWebOS.cmake" ]; then
-            sed -i '1i set(WEBOS_ARCH "arm")' cmake/PackageWebOS.cmake
-            sed -i '2i return()' cmake/PackageWebOS.cmake
-          fi
-
-      - name: Configure build
-        run: |
-          TOOLCHAIN_FILE=$(find "$SDK_DIR" -name "toolchainfile.cmake" | head -1)
-          cmake -Bbuild \
-            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
-            -DTARGET_WEBOS=ON \
-            -DCMAKE_C_FLAGS="-mfpu=vfpv3-d16 -mfloat-abi=softfp" \
-            -DCMAKE_CXX_FLAGS="-mfpu=vfpv3-d16 -mfloat-abi=softfp" \
-            -DCMAKE_BUILD_TYPE=$BUILD_TYPE
-
-      - name: Pre-build ext_opus to download sources
-        run: |
-          cmake --build build --target ext_opus -- -j$(nproc) || true
-
-      - name: Remove Opus NEON sources
-        run: |
-          OPUS_SRC=$(find build -type d -name "ext_opus" | head -1)
-          echo "Opus source at: $OPUS_SRC"
-          if [ -d "$OPUS_SRC" ]; then
-            rm -rf "$OPUS_SRC"/celt/arm
-            rm -rf "$OPUS_SRC"/silk/arm
-          else
-            echo "Opus source not found"
-            find build -maxdepth 6 -type d -name "ext_opus" || true
-          fi
-
-      - name: Build project
-        run: |
-          cmake --build build --parallel $(nproc)
-
-      - name: Package IPK
-        run: |
-          mkdir -p dist
-          APP_PATH=$(find build -name "appinfo.json" -exec dirname {} \; | head -n 1)
-          if [ -z "$APP_PATH" ]; then APP_PATH="build"; fi
-          ares-package "$APP_PATH" -o dist/
-
-      - name: Upload IPK artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ihsplay-webos
