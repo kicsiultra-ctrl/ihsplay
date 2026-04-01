@@ -18,10 +18,14 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install Build Dependencies (Wayland focus)
+      - name: Install Build Dependencies (ARM Emulation Fix)
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y qemu-user-static binfmt-support libwayland-dev wayland-protocols pkg-config
+          # Szükséges az ARM64-es könyvtárak telepítése, hogy az SDK fordítója fusson x86-on
+          sudo apt-get install -y qemu-user-static binfmt-support libc6-arm64-cross libwayland-dev wayland-protocols pkg-config
+          
+          # Beállítjuk a QEMU keresési útvonalát az ARM64 loaderhez
+          echo "QEMU_LD_PREFIX=/usr/aarch64-linux-gnu" >> $GITHUB_ENV
 
       - name: Install ares-package (CLI)
         run: |
@@ -52,7 +56,7 @@ jobs:
           SYSROOT=$(find "$SDK_DIR" -maxdepth 3 -type d -name "sysroot" | head -1)
           echo "SYSROOT=$SYSROOT" >> $GITHUB_ENV
           
-          # PBNJSON stub készítése
+          # PBNJSON stub készítése (ha hiányozna)
           if ! find "$SYSROOT" -name "pbnjson_c.pc" 2>/dev/null | grep -q .; then
             mkdir -p "$SYSROOT/usr/lib/pkgconfig"
             printf 'prefix=/usr\nexec_prefix=${prefix}\nlibdir=${exec_prefix}/lib\nincludedir=${prefix}/include\nName: pbnjson_c\nDescription: pbnjson stub\nVersion: 1.0\nLibs: -L${libdir} -lpbnjson_c\nCflags: -I${includedir}\n' > "$SYSROOT/usr/lib/pkgconfig/pbnjson_c.pc"
@@ -65,35 +69,34 @@ jobs:
           TOOLCHAIN_FILE=$(find "$SDK_DIR" -name "toolchainfile.cmake" | head -1)
           mkdir -p build
           
-          # 1. Elő-konfiguráció, hogy a CMake letöltse a külső függőségeket (SDL2, Opus stb.)
+          # 1. Elő-konfiguráció a letöltéshez (engedjük hibázni)
           cmake -Bbuild \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
             -DTARGET_WEBOS=ON \
-            -DBUILD_TESTS=OFF \
             -DOPUS_WITH_NEON=OFF \
             -DOPUS_USE_NEON=OFF \
+            -DSDL_WAYLAND=ON \
             -DCMAKE_BUILD_TYPE=$BUILD_TYPE || true
 
-          # 2. Opus NEON kiirtása a gyökerénél: kikapcsoljuk az ARM detektálást a fejlécben
-          OPUS_DIR="build/ext_opus-prefix/src/ext_opus"
-          if [ -d "$OPUS_DIR" ]; then
-            echo "Hard-patching Opus headers to disable ARM optimizations..."
-            # Letiltjuk az összes ARM asm-et és intrinsics-et a config fájlban
-            find "$OPUS_DIR" -name "config.h" -exec sed -i 's/#define OPUS_ARM_EXTERNAL_ASM 1/\/* #undef OPUS_ARM_EXTERNAL_ASM *\//g' {} +
-            find "$OPUS_DIR" -name "cpu_arm.h" -exec sed -i 's/#define OPUS_ARM_MAY_HAVE_NEON 1/#define OPUS_ARM_MAY_HAVE_NEON 0/g' {} +
-            # Fizikailag töröljük azokat a fájlokat, amik a hibát okozták
+          # 2. Opus kényszerített NEON deaktiválás
+          OPUS_SRC="build/ext_opus-prefix/src/ext_opus"
+          if [ -d "$OPUS_SRC" ]; then
+            echo "Hard-patching Opus to kill NEON..."
+            # Letiltjuk a NEON-t a konfigurációs fejlécekben
+            find "$OPUS_SRC" -name "*.h" -exec sed -i 's/#define OPUS_ARM_MAY_HAVE_NEON 1/#define OPUS_ARM_MAY_HAVE_NEON 0/g' {} +
+            find "$OPUS_SRC" -name "*.h" -exec sed -i 's/#define OPUS_ARM_HAS_NEON 1/#define OPUS_ARM_HAS_NEON 0/g' {} +
+            # Töröljük a problémás intrinics fájlokat, hogy véletlenül se próbálja fordítani
             find build/ext_opus-prefix -name "*neon_intr.c" -delete
           fi
 
-          # 3. SDL2 Wayland fix: Kényszerítjük a Wayland támogatást
-          # Az SDK sysroot-ját adjuk meg keresési útvonalnak
+          # 3. Végleges konfiguráció
           cmake -Bbuild \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
             -DTARGET_WEBOS=ON \
-            -DSDL_WAYLAND=ON \
-            -DSDL_VIDEO_DRIVER_WAYLAND=ON \
             -DOPUS_WITH_NEON=OFF \
             -DOPUS_USE_NEON=OFF \
+            -DSDL_WAYLAND=ON \
+            -DSDL_VIDEO_DRIVER_WAYLAND=ON \
             -DCMAKE_BUILD_TYPE=$BUILD_TYPE
 
       - name: Build Project
@@ -103,7 +106,6 @@ jobs:
       - name: Package IPK
         run: |
           mkdir -p dist
-          # Megkeressük hol jött létre az appinfo.json
           APP_PATH=$(find build -name "appinfo.json" -exec dirname {} \; | head -n 1)
           if [ -z "$APP_PATH" ]; then APP_PATH="build"; fi
           ares-package "$APP_PATH" -o dist/
