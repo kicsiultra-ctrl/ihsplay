@@ -44,14 +44,25 @@ jobs:
           echo "Found SDK dir: $SDK_DIR"
           "$SDK_DIR/relocate-sdk.sh"
           echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
-          echo "Compiler binaries:"
-          ls "$SDK_DIR/usr/bin/" | grep gcc || true
 
-      - name: Install 32-bit libs
+      - name: Debug compiler
+        run: |
+          GCC=$(find "$SDK_DIR/bin" -name "*gcc" | head -1)
+          echo "GCC path: $GCC"
+          file "$GCC"
+          readelf -l "$GCC" | grep interpreter || true
+
+      - name: Fix 32-bit ELF interpreter
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update -qq
-          sudo apt-get install -y gcc-multilib lib32z1 libstdc++6:i386 || true
+          sudo apt-get install -y \
+            libc6:i386 \
+            libstdc++6:i386 \
+            zlib1g:i386 \
+            lib32z1 \
+            lib32stdc++6 \
+            lib32gcc-s1
 
       - name: Build
         run: |
