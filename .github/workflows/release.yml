@@ -4,8 +4,7 @@ on:
   workflow_dispatch:
 
 env:
-  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
-  BUILD_TYPE: Debug
+  BUILD_TYPE: Release
 
 jobs:
   build-webos:
@@ -16,53 +15,46 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Download ares-cli-rs
-        uses: robinraju/release-downloader@v1.9
-        with:
-          repository: "webosbrew/ares-cli-rs"
-          latest: true
-          fileName: "ares-package_*.deb"
-          out-file-path: "temp"
-
-      - name: Download Homebrew Toolbox
-        uses: robinraju/release-downloader@v1.9
-        with:
-          repository: "webosbrew/dev-toolbox-cli"
-          latest: true
-          fileName: "webosbrew-toolbox-gen-manifest_*.deb"
-          out-file-path: "temp"
-
-      - name: Install Tools
-        run: sudo apt-get install ./temp/*.deb
+      - name: Install ares-package
+        run: |
+          # Lekérjük a legfrissebb release pontos asset nevét a GitHub API-n keresztül
+          ARES_URL=$(curl -s https://api.github.com/repos/webosbrew/ares-cli-rs/releases/latest \
+            | grep "browser_download_url" \
+            | grep "ares-package.*\.deb" \
+            | cut -d '"' -f 4 \
+            | head -1)
+          echo "Downloading: $ARES_URL"
+          curl -L "$ARES_URL" -o /tmp/ares-package.deb
+          sudo apt install /tmp/ares-package.deb
 
       - name: Download webOS NDK
-        uses: robinraju/release-downloader@v1.9
-        with:
-          repository: "openlgtv/buildroot-nc4"
-          latest: true
-          fileName: "arm-webos-linux-gnueabi_sdk-buildroot.tar.gz"
-          out-file-path: "/tmp"
+        run: |
+          # Lekérjük a legfrissebb NDK asset pontos URL-jét
+          NDK_URL=$(curl -s https://api.github.com/repos/openlgtv/buildroot-nc4/releases/latest \
+            | grep "browser_download_url" \
+            | grep "\.tar\.gz" \
+            | cut -d '"' -f 4 \
+            | head -1)
+          echo "Downloading NDK: $NDK_URL"
+          curl -L "$NDK_URL" -o /tmp/webos-sdk.tar.gz
 
       - name: Extract webOS NDK
-        shell: bash
         working-directory: /tmp
         run: |
-          tar xzf arm-webos-linux-gnueabi_sdk-buildroot.tar.gz
-          ./arm-webos-linux-gnueabi_sdk-buildroot/relocate-sdk.sh
+          tar xzf webos-sdk.tar.gz
+          # A kicsomagolt mappa neve változhat, megkeressük
+          SDK_DIR=$(find /tmp -maxdepth 1 -type d -name "*sdk-buildroot*" | head -1)
+          echo "SDK dir: $SDK_DIR"
+          "$SDK_DIR/relocate-sdk.sh"
+          echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
 
       - name: Build
-        env:
-          TOOLCHAIN_FILE: /tmp/arm-webos-linux-gnueabi_sdk-buildroot/usr/share/buildroot/toolchainfile.cmake
-        run: ./tools/webos/easy_build.sh -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+        run: |
+          TOOLCHAIN_FILE="$SDK_DIR/usr/share/buildroot/toolchainfile.cmake" \
+          ./tools/webos/easy_build.sh -DCMAKE_BUILD_TYPE=$BUILD_TYPE
 
-      - name: Create Release (webOS)
-        id: create_release_webos
-        uses: ncipollo/release-action@v1.14.0
+      - name: Upload IPK artifact
+        uses: actions/upload-artifact@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          name: Release ${{ steps.tagName.outputs.tag }}
-          allowUpdates: true
-          omitNameDuringUpdate: true
-          omitBodyDuringUpdate: true
-          omitPrereleaseDuringUpdate: true
-          artifacts: dist/*.ipk,dist/*.manifest.json
+          name: ihsplay-webos
+          path: dist/*.ipk
