@@ -35,9 +35,7 @@ jobs:
             libstdc++6-arm64-cross \
             libgcc-s1-arm64-cross
           sudo update-binfmts --enable qemu-aarch64
-          # ld-linux interpreter symlink
           sudo ln -sf /usr/aarch64-linux-gnu/lib/ld-linux-aarch64.so.1 /lib/ld-linux-aarch64.so.1 || true
-          # libc és társai - qemu ezeket a /lib64 vagy /usr/aarch64-linux-gnu/lib alatt keresi
           sudo ln -sf /usr/aarch64-linux-gnu/lib /lib/aarch64-linux-gnu || true
 
       - name: Download webOS NDK
@@ -58,12 +56,20 @@ jobs:
           echo "Found SDK dir: $SDK_DIR"
           "$SDK_DIR/relocate-sdk.sh"
           echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
+          # pbnjson_c elérési útja a sysroot-ban
+          SYSROOT=$(find "$SDK_DIR" -maxdepth 2 -type d -name "sysroot" | head -1)
+          echo "SYSROOT=$SYSROOT" >> $GITHUB_ENV
+          echo "Sysroot: $SYSROOT"
+          find "$SYSROOT" -name "pbnjson*" 2>/dev/null || echo "pbnjson not found in sysroot"
 
       - name: Build
         run: |
           TOOLCHAIN_FILE=$(find "$SDK_DIR" -name "toolchainfile.cmake" | head -1)
           echo "Using toolchain: $TOOLCHAIN_FILE"
-          TOOLCHAIN_FILE="$TOOLCHAIN_FILE" ./tools/webos/easy_build.sh -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+          TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
+          PKG_CONFIG_SYSROOT_DIR="$SYSROOT" \
+          PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" \
+          ./tools/webos/easy_build.sh -DCMAKE_BUILD_TYPE=$BUILD_TYPE
 
       - name: Upload IPK artifact
         uses: actions/upload-artifact@v4
