@@ -17,7 +17,6 @@ jobs:
 
       - name: Install ares-package
         run: |
-          # Lekérjük a legfrissebb release pontos asset nevét a GitHub API-n keresztül
           ARES_URL=$(curl -s https://api.github.com/repos/webosbrew/ares-cli-rs/releases/latest \
             | grep "browser_download_url" \
             | grep "ares-package.*\.deb" \
@@ -25,11 +24,10 @@ jobs:
             | head -1)
           echo "Downloading: $ARES_URL"
           curl -L "$ARES_URL" -o /tmp/ares-package.deb
-          sudo apt install /tmp/ares-package.deb
+          sudo apt install -y /tmp/ares-package.deb
 
       - name: Download webOS NDK
         run: |
-          # Lekérjük a legfrissebb NDK asset pontos URL-jét
           NDK_URL=$(curl -s https://api.github.com/repos/openlgtv/buildroot-nc4/releases/latest \
             | grep "browser_download_url" \
             | grep "\.tar\.gz" \
@@ -38,20 +36,28 @@ jobs:
           echo "Downloading NDK: $NDK_URL"
           curl -L "$NDK_URL" -o /tmp/webos-sdk.tar.gz
 
-      - name: Extract webOS NDK
-        working-directory: /tmp
+      - name: Extract and relocate webOS NDK
         run: |
+          cd /tmp
           tar xzf webos-sdk.tar.gz
-          # A kicsomagolt mappa neve változhat, megkeressük
-          SDK_DIR=$(find /tmp -maxdepth 1 -type d -name "*sdk-buildroot*" | head -1)
-          echo "SDK dir: $SDK_DIR"
+          SDK_DIR=$(find /tmp -maxdepth 1 -type d \( -name "*sdk-buildroot*" -o -name "*sdk*buildroot*" \) | head -1)
+          echo "Found SDK dir: $SDK_DIR"
           "$SDK_DIR/relocate-sdk.sh"
           echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
+          echo "Compiler binaries:"
+          ls "$SDK_DIR/usr/bin/" | grep gcc || true
+
+      - name: Install 32-bit libs
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc-multilib lib32z1 libstdc++6:i386 || true
 
       - name: Build
         run: |
-          TOOLCHAIN_FILE="$SDK_DIR/usr/share/buildroot/toolchainfile.cmake" \
-          ./tools/webos/easy_build.sh -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+          TOOLCHAIN_FILE=$(find "$SDK_DIR" -name "toolchainfile.cmake" | head -1)
+          echo "Using toolchain: $TOOLCHAIN_FILE"
+          TOOLCHAIN_FILE="$TOOLCHAIN_FILE" ./tools/webos/easy_build.sh -DCMAKE_BUILD_TYPE=$BUILD_TYPE
 
       - name: Upload IPK artifact
         uses: actions/upload-artifact@v4
