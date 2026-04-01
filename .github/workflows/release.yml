@@ -26,36 +26,53 @@ jobs:
           sudo apt-get install -y cmake build-essential pkg-config \
             libfreetype6-dev libfontconfig1-dev jq curl
 
-      - name: Download webOS NDK
+      - name: Download and Extract webOS NDK
         run: |
           cd /tmp
           NDK_URL=$(curl -s https://api.github.com/repos/openlgtv/buildroot-nc4/releases/latest | jq -r '.assets[] | select(.name | test("tar.gz")) | .browser_download_url' | head -1)
-          echo "Downloaded URL: $NDK_URL"
+          echo "Downloading: $NDK_URL"
           curl -L "$NDK_URL" -o webos-sdk.tar.gz
           tar xzf webos-sdk.tar.gz
-          SDK_DIR=$(find /tmp -maxdepth 1 -type d -name "*buildroot*" -o -name "*sdk*" | head -1)
-          echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
-          echo "Contents:"
-          ls -la "$SDK_DIR/usr/share/buildroot/" || ls -la "$SDK_DIR/"
-
-      - name: Build
-        run: |
-          mkdir -p build
-          TOOLCHAIN_FILE="${{ env.SDK_DIR }}/usr/share/buildroot/toolchainfile.cmake"
-          if [ ! -f "$TOOLCHAIN_FILE" ]; then
-            echo "Toolchain not found, searching..."
-            find ${{ env.SDK_DIR }} -name "toolchainfile.cmake" -o -name "*.cmake" | head -5
+          
+          # Find the extracted SDK directory
+          SDK_DIR=$(ls -d arm-* 2>/dev/null | head -1)
+          if [ -z "$SDK_DIR" ]; then
+            echo "SDK not found, listing /tmp:"
+            ls -la /tmp | grep -E "arm|sdk|buildroot"
             exit 1
           fi
+          
+          echo "SDK_DIR=/tmp/$SDK_DIR" >> $GITHUB_ENV
+          echo "Found SDK at: /tmp/$SDK_DIR"
+          ls -la /tmp/$SDK_DIR/usr/share/buildroot/ 2>/dev/null || echo "Buildroot dir not found"
+
+      - name: Relocate SDK
+        run: |
+          ${{ env.SDK_DIR }}/relocate-sdk.sh || true
+
+      - name: Build
+        env:
+          TOOLCHAIN_FILE: ${{ env.SDK_DIR }}/usr/share/buildroot/toolchainfile.cmake
+        run: |
+          mkdir -p build
+          echo "Using toolchain: $TOOLCHAIN_FILE"
+          
+          if [ ! -f "$TOOLCHAIN_FILE" ]; then
+            echo "ERROR: Toolchain not found!"
+            find ${{ env.SDK_DIR }} -name "*.cmake" | head -10
+            exit 1
+          fi
+          
           cmake -Bbuild \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
             -DTARGET_WEBOS=ON \
             -DBUILD_TESTS=OFF \
             -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+          
           cmake --build build --parallel $(nproc)
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ihsplay-webos
-          path: build/
+          path: build/*.ipk
