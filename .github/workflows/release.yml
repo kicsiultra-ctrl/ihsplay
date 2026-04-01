@@ -53,6 +53,7 @@ jobs:
           SYSROOT=$(find "$SDK_DIR" -maxdepth 3 -type d -name "sysroot" | head -1)
           echo "SYSROOT=$SYSROOT" >> $GITHUB_ENV
           
+          # PBNJSON stub
           if ! find "$SYSROOT" -name "pbnjson_c.pc" 2>/dev/null | grep -q .; then
             mkdir -p "$SYSROOT/usr/lib/pkgconfig"
             printf 'prefix=/usr\nexec_prefix=${prefix}\nlibdir=${exec_prefix}/lib\nincludedir=${prefix}/include\nName: pbnjson_c\nDescription: pbnjson stub\nVersion: 1.0\nLibs: -L${libdir} -lpbnjson_c\nCflags: -I${includedir}\n' > "$SYSROOT/usr/lib/pkgconfig/pbnjson_c.pc"
@@ -60,34 +61,43 @@ jobs:
             "$SDK_DIR/bin/arm-lgtv-linux-gnueabi-gcc" -shared -o "$SYSROOT/usr/lib/libpbnjson_c.so" /tmp/pbnjson_stub.c || true
           fi
 
+      - name: Fix PackageWebOS.cmake Architecture Detection
+        run: |
+          # Ez a sor "meghekkeljük" a projekt saját ellenőrző scriptjét.
+          # Bármit is találna ki, kényszerítjük, hogy az architektúra 'arm' legyen.
+          if [ -f "cmake/PackageWebOS.cmake" ]; then
+            sed -i '1i set(WEBOS_ARCH "arm")' cmake/PackageWebOS.cmake
+            sed -i '2i return()' cmake/PackageWebOS.cmake
+            echo "Patched cmake/PackageWebOS.cmake to force ARM architecture."
+          fi
+
       - name: Configure and Patch External Projects
         run: |
           TOOLCHAIN_FILE=$(find "$SDK_DIR" -name "toolchainfile.cmake" | head -1)
           mkdir -p build
           
-          # Első konfiguráció (WEBOS_ARCH=arm hozzáadva)
+          # Első kör a függőségek letöltéséhez
           cmake -Bbuild \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
             -DTARGET_WEBOS=ON \
-            -DWEBOS_ARCH=arm \
             -DOPUS_WITH_NEON=OFF \
             -DOPUS_USE_NEON=OFF \
             -DSDL_WAYLAND=ON \
             -DCMAKE_BUILD_TYPE=$BUILD_TYPE || true
 
+          # Opus NEON javítás
           OPUS_SRC="build/ext_opus-prefix/src/ext_opus"
           if [ -d "$OPUS_SRC" ]; then
-            echo "Hard-patching Opus for webOS ARM..."
+            echo "Hard-patching Opus to kill NEON..."
             find "$OPUS_SRC" -name "*.h" -exec sed -i 's/#define OPUS_ARM_MAY_HAVE_NEON 1/#define OPUS_ARM_MAY_HAVE_NEON 0/g' {} +
             find "$OPUS_SRC" -name "*.h" -exec sed -i 's/#define OPUS_ARM_HAS_NEON 1/#define OPUS_ARM_HAS_NEON 0/g' {} +
             find build/ext_opus-prefix -name "*neon_intr.c" -delete
           fi
 
-          # Második, végleges konfiguráció
+          # Végleges konfiguráció
           cmake -Bbuild \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
             -DTARGET_WEBOS=ON \
-            -DWEBOS_ARCH=arm \
             -DOPUS_WITH_NEON=OFF \
             -DOPUS_USE_NEON=OFF \
             -DSDL_WAYLAND=ON \
