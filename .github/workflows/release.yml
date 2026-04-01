@@ -21,23 +21,19 @@ jobs:
           submodules: recursive
 
       - name: Download webOS NDK
-        uses: robinraju/release-downloader@v1.9
-        with:
-          repository: "openlgtv/buildroot-nc4"
-          latest: true
-          fileName: "arm-webos-linux-gnueabi_sdk-buildroot.tar.gz"
-          out-file-path: "/tmp"
-
-      - name: Extract webOS NDK
-        shell: bash
-        working-directory: /tmp
         run: |
-          tar xzf arm-webos-linux-gnueabi_sdk-buildroot.tar.gz
-          ./arm-webos-linux-gnueabi_sdk-buildroot/relocate-sdk.sh
+          cd /tmp
+          NDK_URL=$(curl -s https://api.github.com/repos/openlgtv/buildroot-nc4/releases/latest | jq -r '.assets[] | select(.name | test("tar.gz")) | .browser_download_url' | head -1)
+          echo "Downloading from: $NDK_URL"
+          curl -L "$NDK_URL" -o webos-sdk.tar.gz
+          tar xzf webos-sdk.tar.gz
+          SDK_DIR=$(find /tmp -maxdepth 1 -type d -name "*buildroot*" | head -1)
+          echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
+          "$SDK_DIR/relocate-sdk.sh"
 
       - name: Build with CMake
         env:
-          TOOLCHAIN_FILE: /tmp/arm-webos-linux-gnueabi_sdk-buildroot/usr/share/buildroot/toolchainfile.cmake
+          TOOLCHAIN_FILE: ${{ env.SDK_DIR }}/usr/share/buildroot/toolchainfile.cmake
           CI: true
         run: |
           mkdir -p build
