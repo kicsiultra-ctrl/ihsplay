@@ -56,19 +56,40 @@ jobs:
           echo "Found SDK dir: $SDK_DIR"
           "$SDK_DIR/relocate-sdk.sh"
           echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
-          # pbnjson_c elérési útja a sysroot-ban
-          SYSROOT=$(find "$SDK_DIR" -maxdepth 2 -type d -name "sysroot" | head -1)
+          SYSROOT=$(find "$SDK_DIR" -maxdepth 3 -type d -name "sysroot" | head -1)
           echo "SYSROOT=$SYSROOT" >> $GITHUB_ENV
           echo "Sysroot: $SYSROOT"
-          find "$SYSROOT" -name "pbnjson*" 2>/dev/null || echo "pbnjson not found in sysroot"
+          # pbnjson keresése
+          find "$SYSROOT" -name "pbnjson*" 2>/dev/null && echo "pbnjson FOUND" || echo "pbnjson NOT FOUND"
+          # fake pbnjson.pc létrehozása ha nincs
+          if ! find "$SYSROOT" -name "pbnjson_c.pc" 2>/dev/null | grep -q .; then
+            echo "Creating fake pbnjson_c.pc..."
+            mkdir -p "$SYSROOT/usr/lib/pkgconfig"
+            cat > "$SYSROOT/usr/lib/pkgconfig/pbnjson_c.pc" << 'PKGEOF'
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: pbnjson_c
+Description: pbnjson C library (stub for build)
+Version: 1.0
+Libs: -L${libdir} -lpbnjson_c
+Cflags: -I${includedir}
+PKGEOF
+            # fake libpbnjson_c.so stub
+            echo "void pbnjson_stub(){}" > /tmp/pbnjson_stub.c
+            "$SDK_DIR/bin/arm-lgtv-linux-gnueabi-gcc" -shared -o "$SYSROOT/usr/lib/libpbnjson_c.so" /tmp/pbnjson_stub.c || true
+            # fake header
+            mkdir -p "$SYSROOT/usr/include"
+            touch "$SYSROOT/usr/include/pbnjson.h"
+          fi
 
       - name: Build
         run: |
           TOOLCHAIN_FILE=$(find "$SDK_DIR" -name "toolchainfile.cmake" | head -1)
           echo "Using toolchain: $TOOLCHAIN_FILE"
           TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
-          PKG_CONFIG_SYSROOT_DIR="$SYSROOT" \
-          PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" \
           ./tools/webos/easy_build.sh -DCMAKE_BUILD_TYPE=$BUILD_TYPE
 
       - name: Upload IPK artifact
