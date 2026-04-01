@@ -18,13 +18,13 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install Build Dependencies (ARM Emulation Fix)
+      - name: Install build dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y qemu-user-static binfmt-support libc6-arm64-cross libwayland-dev wayland-protocols pkg-config
           echo "QEMU_LD_PREFIX=/usr/aarch64-linux-gnu" >> $GITHUB_ENV
 
-      - name: Install ares-package (CLI)
+      - name: Install ares-package
         run: |
           ARES_URL=$(curl -s https://api.github.com/repos/webosbrew/ares-cli-rs/releases/latest \
             | grep "browser_download_url" \
@@ -53,7 +53,6 @@ jobs:
           SYSROOT=$(find "$SDK_DIR" -maxdepth 3 -type d -name "sysroot" | head -1)
           echo "SYSROOT=$SYSROOT" >> $GITHUB_ENV
 
-          # PBNJSON stub
           if ! find "$SYSROOT" -name "pbnjson_c.pc" 2>/dev/null | grep -q .; then
             mkdir -p "$SYSROOT/usr/lib/pkgconfig"
             printf 'prefix=/usr\nexec_prefix=${prefix}\nlibdir=${exec_prefix}/lib\nincludedir=${prefix}/include\nName: pbnjson_c\nDescription: pbnjson stub\nVersion: 1.0\nLibs: -L${libdir} -lpbnjson_c\nCflags: -I${includedir}\n' > "$SYSROOT/usr/lib/pkgconfig/pbnjson_c.pc"
@@ -61,34 +60,13 @@ jobs:
             "$SDK_DIR/bin/arm-lgtv-linux-gnueabi-gcc" -shared -o "$SYSROOT/usr/lib/libpbnjson_c.so" /tmp/pbnjson_stub.c || true
           fi
 
-      - name: Fix PackageWebOS.cmake Architecture Detection
+      - name: Fix PackageWebOS.cmake architecture detection
         run: |
           if [ -f "cmake/PackageWebOS.cmake" ]; then
             sed -i '1i set(WEBOS_ARCH "arm")' cmake/PackageWebOS.cmake
             sed -i '2i return()' cmake/PackageWebOS.cmake
           fi
 
-      # 🔥 1) Trigger ext_opus download + configure (but not build)
-      - name: Pre-build: trigger ext_opus download
-        run: |
-          cmake -Bbuild .
-          cmake --build build --target ext_opus -- -j$(nproc) || true
-
-      # 🔥 2) Remove NEON sources after ext_opus is downloaded
-      - name: Remove Opus NEON sources
-        run: |
-          OPUS_SRC=$(find build -type d -name "ext_opus" | head -1)
-          echo "Opus source at: $OPUS_SRC"
-          if [ -d "$OPUS_SRC" ]; then
-            echo "Removing ARM/NEON sources..."
-            rm -rf "$OPUS_SRC"/celt/arm
-            rm -rf "$OPUS_SRC"/silk/arm
-          else
-            echo "Opus source not found!"
-            find build -maxdepth 5 -type d -name "ext_opus"
-          fi
-
-      # 🔥 3) Full configure (now NEON dirs are gone)
       - name: Configure build
         run: |
           TOOLCHAIN_FILE=$(find "$SDK_DIR" -name "toolchainfile.cmake" | head -1)
@@ -99,8 +77,23 @@ jobs:
             -DCMAKE_CXX_FLAGS="-mfpu=vfpv3-d16 -mfloat-abi=softfp" \
             -DCMAKE_BUILD_TYPE=$BUILD_TYPE
 
-      # 🔥 4) Build everything (Opus now NEON-free)
-      - name: Build Project
+      - name: Pre-build ext_opus to download sources
+        run: |
+          cmake --build build --target ext_opus -- -j$(nproc) || true
+
+      - name: Remove Opus NEON sources
+        run: |
+          OPUS_SRC=$(find build -type d -name "ext_opus" | head -1)
+          echo "Opus source at: $OPUS_SRC"
+          if [ -d "$OPUS_SRC" ]; then
+            rm -rf "$OPUS_SRC"/celt/arm
+            rm -rf "$OPUS_SRC"/silk/arm
+          else
+            echo "Opus source not found"
+            find build -maxdepth 6 -type d -name "ext_opus" || true
+          fi
+
+      - name: Build project
         run: |
           cmake --build build --parallel $(nproc)
 
