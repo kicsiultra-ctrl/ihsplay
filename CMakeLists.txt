@@ -43,6 +43,24 @@ if (CMAKE_C_COMPILER_NAME MATCHES "^arm-webos-linux-gnueabi-")
     set(TARGET_WEBOS TRUE)
 endif ()
 
+# --- 🔥 WEBOS: Disable all ARM NEON / intrinsics for Opus ---
+if (TARGET_WEBOS)
+    message(STATUS "Disabling Opus NEON optimizations for webOS target")
+
+    # Disable NEON at compiler level
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mfpu=none -mfloat-abi=softfp")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mfpu=none -mfloat-abi=softfp")
+
+    # Disable Opus ARM optimizations
+    set(OPUS_DISABLE_INTRINSICS ON CACHE BOOL "" FORCE)
+    set(OPUS_ARM_MAY_HAVE_NEON 0 CACHE BOOL "" FORCE)
+    set(OPUS_ARM_PRESUME_NEON 0 CACHE BOOL "" FORCE)
+    set(OPUS_ARM_MAY_HAVE_MEDIA 0 CACHE BOOL "" FORCE)
+    set(OPUS_ARM_PRESUME_MEDIA 0 CACHE BOOL "" FORCE)
+    set(OPUS_ARM_MAY_HAVE_EDSP 0 CACHE BOOL "" FORCE)
+    set(OPUS_ARM_PRESUME_EDSP 0 CACHE BOOL "" FORCE)
+endif ()
+
 # Use `pkg-config` to link needed libraries.
 find_package(PkgConfig REQUIRED)
 find_package(Freetype REQUIRED)
