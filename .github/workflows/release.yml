@@ -43,7 +43,6 @@ jobs:
             | grep "\.tar\.gz" \
             | cut -d '"' -f 4 \
             | head -1)
-          echo "Downloading NDK: $NDK_URL"
           curl -L "$NDK_URL" -o /tmp/webos-sdk.tar.gz
 
       - name: Extract and relocate webOS NDK
@@ -51,12 +50,10 @@ jobs:
           cd /tmp
           tar xzf webos-sdk.tar.gz
           SDK_DIR=$(find /tmp -maxdepth 1 -type d \( -name "*sdk-buildroot*" -o -name "*sdk*buildroot*" \) | head -1)
-          echo "Found SDK dir: $SDK_DIR"
           "$SDK_DIR/relocate-sdk.sh"
           echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
           SYSROOT=$(find "$SDK_DIR" -maxdepth 3 -type d -name "sysroot" | head -1)
           echo "SYSROOT=$SYSROOT" >> $GITHUB_ENV
-          find "$SYSROOT" -name "pbnjson*" 2>/dev/null && echo "pbnjson FOUND" || echo "pbnjson NOT FOUND"
           if ! find "$SYSROOT" -name "pbnjson_c.pc" 2>/dev/null | grep -q .; then
             mkdir -p "$SYSROOT/usr/lib/pkgconfig"
             printf 'prefix=/usr\nexec_prefix=${prefix}\nlibdir=${exec_prefix}/lib\nincludedir=${prefix}/include\nName: pbnjson_c\nDescription: pbnjson stub\nVersion: 1.0\nLibs: -L${libdir} -lpbnjson_c\nCflags: -I${includedir}\n' > "$SYSROOT/usr/lib/pkgconfig/pbnjson_c.pc"
@@ -66,10 +63,13 @@ jobs:
             touch "$SYSROOT/usr/include/pbnjson.h"
           fi
 
+      - name: Fix PackageWebOS compiler name check
+        run: |
+          sed -i 's/arm-webos-linux-gnueabi-/arm-lgtv-linux-gnueabi-/g' cmake/PackageWebOS.cmake
+
       - name: Build
         run: |
           TOOLCHAIN_FILE=$(find "$SDK_DIR" -name "toolchainfile.cmake" | head -1)
-          echo "Using toolchain: $TOOLCHAIN_FILE"
           TOOLCHAIN_FILE="$TOOLCHAIN_FILE" ./tools/webos/easy_build.sh -DCMAKE_BUILD_TYPE=$BUILD_TYPE
 
       - name: Upload IPK artifact
