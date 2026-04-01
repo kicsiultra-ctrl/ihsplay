@@ -18,7 +18,7 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install ares-package
+      - name: Install ares-package (CLI)
         run: |
           ARES_URL=$(curl -s https://api.github.com/repos/webosbrew/ares-cli-rs/releases/latest \
             | grep "browser_download_url" \
@@ -54,6 +54,7 @@ jobs:
           echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
           SYSROOT=$(find "$SDK_DIR" -maxdepth 3 -type d -name "sysroot" | head -1)
           echo "SYSROOT=$SYSROOT" >> $GITHUB_ENV
+          # PBNJSON stub készítése a build-hez
           if ! find "$SYSROOT" -name "pbnjson_c.pc" 2>/dev/null | grep -q .; then
             mkdir -p "$SYSROOT/usr/lib/pkgconfig"
             printf 'prefix=/usr\nexec_prefix=${prefix}\nlibdir=${exec_prefix}/lib\nincludedir=${prefix}/include\nName: pbnjson_c\nDescription: pbnjson stub\nVersion: 1.0\nLibs: -L${libdir} -lpbnjson_c\nCflags: -I${includedir}\n' > "$SYSROOT/usr/lib/pkgconfig/pbnjson_c.pc"
@@ -65,16 +66,15 @@ jobs:
 
       - name: Fix PackageWebOS compiler name check
         run: |
-          # Ez biztosítja, hogy a CMake felismerje az LG toolchaint webOS-ként
           sed -i 's/arm-webos-linux-gnueabi-/arm-lgtv-linux-gnueabi-/g' cmake/PackageWebOS.cmake
 
       - name: Configure and Build
         run: |
           TOOLCHAIN_FILE=$(find "$SDK_DIR" -name "toolchainfile.cmake" | head -1)
+          mkdir -p build
           
-          # Az OPUS_WITH_NEON=OFF és OPUS_USE_NEON=OFF flag kinyírja a hibás ARM optimalizációt
-          # Hozzáadtuk a -mfpu=vfp flaget is, ami biztonságosabb az öreg tévékhez
-          ./tools/webos/easy_build.sh \
+          # Közvetlen CMake hívás az Opus NEON tiltásával és a helyes flag-ekkel
+          cmake -Bbuild \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
             -DTARGET_WEBOS=ON \
             -DBUILD_TESTS=OFF \
@@ -82,12 +82,21 @@ jobs:
             -DOPUS_USE_NEON=OFF \
             -DCMAKE_C_FLAGS="-mfpu=vfp -mfloat-abi=softfp" \
             -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+          
+          cmake --build build --parallel $(nproc)
+
+      - name: Package IPK
+        run: |
+          # Létrehozzuk a dist mappát a kimenetnek
+          mkdir -p dist
+          
+          # Csomagolás. Feltételezzük, hogy az appinfo.json az 'app' mappában van.
+          # Ha a projekt gyökerében van, akkor a 'build' helyett '.' kell.
+          # Az ares-package a build könyvtár tartalmát csomagolja be.
+          ares-package build/app -o dist/ || ares-package build -o dist/
 
       - name: Upload IPK artifact
         uses: actions/upload-artifact@v4
         with:
           name: ihsplay-webos
-          # Az easy_build.sh általában a build mappába vagy egy dist mappába rakja a kész fájlt
-          path: |
-            build/*.ipk
-            *.ipk
+          path: dist/*.ipk
