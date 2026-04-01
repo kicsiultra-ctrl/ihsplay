@@ -14,6 +14,8 @@ env:
 jobs:
   build-webos:
     runs-on: ubuntu-latest
+    container:
+      image: ubuntu:20.04
 
     steps:
       - uses: actions/checkout@v4
@@ -22,8 +24,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user-static binfmt-support cmake build-essential pkg-config
+          apt-get update
+          apt-get install -y cmake build-essential git curl tar gzip pkg-config \
+            libfreetype6-dev libfontconfig1-dev
 
       - name: Download webOS NDK
         run: |
@@ -34,9 +37,9 @@ jobs:
           tar xzf webos-sdk.tar.gz
           SDK_DIR=$(find /tmp -maxdepth 1 -type d -name "*buildroot*" | head -1)
           echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
-          "$SDK_DIR/relocate-sdk.sh" || true
+          ls -la "$SDK_DIR/" || true
 
-      - name: Configure CMake
+      - name: Build
         env:
           TOOLCHAIN_FILE: ${{ env.SDK_DIR }}/usr/share/buildroot/toolchainfile.cmake
         run: |
@@ -45,10 +48,7 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE="${TOOLCHAIN_FILE}" \
             -DTARGET_WEBOS=ON \
             -DBUILD_TESTS=OFF \
-            -DCMAKE_BUILD_TYPE=$BUILD_TYPE
-
-      - name: Build
-        run: |
+            -DCMAKE_BUILD_TYPE=$BUILD_TYPE || cat build/CMakeFiles/CMakeOutput.log
           cmake --build build --parallel $(nproc)
 
       - name: Package IPK
@@ -60,6 +60,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ihsplay-webos
-          path: |
-            build/*.ipk
-            dist/*.ipk
+          path: build/*.ipk
