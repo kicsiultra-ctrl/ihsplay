@@ -5,6 +5,8 @@ on:
     branches:
       - main
   workflow_dispatch:
+  release:
+    types: [ created ]
 
 env:
   BUILD_TYPE: Release
@@ -26,20 +28,33 @@ jobs:
           fileName: "arm-webos-linux-gnueabi_sdk-buildroot.tar.gz"
           out-file-path: "/tmp"
 
-      - name: Extract and relocate webOS NDK
+      - name: Extract webOS NDK
         shell: bash
         working-directory: /tmp
         run: |
           tar xzf arm-webos-linux-gnueabi_sdk-buildroot.tar.gz
           ./arm-webos-linux-gnueabi_sdk-buildroot/relocate-sdk.sh
 
-      - name: Build
+      - name: Build with CMake
         env:
           TOOLCHAIN_FILE: /tmp/arm-webos-linux-gnueabi_sdk-buildroot/usr/share/buildroot/toolchainfile.cmake
-        run: ./tools/webos/easy_build.sh -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+          CI: true
+        run: |
+          mkdir -p build
+          cmake -Bbuild \
+            -DCMAKE_TOOLCHAIN_FILE="${TOOLCHAIN_FILE}" \
+            -DTARGET_WEBOS=ON \
+            -DBUILD_TESTS=OFF \
+            -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+          cmake --build build --parallel $(nproc)
 
-      - name: Upload artifacts
+      - name: Create IPK package
+        run: |
+          cd build
+          cpack
+
+      - name: Upload IPK artifact
         uses: actions/upload-artifact@v4
         with:
           name: ihsplay-webos
-          path: dist/*.ipk
+          path: build/*.ipk
