@@ -52,7 +52,7 @@ jobs:
           echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
           SYSROOT=$(find "$SDK_DIR" -maxdepth 3 -type d -name "sysroot" | head -1)
           echo "SYSROOT=$SYSROOT" >> $GITHUB_ENV
-          
+
           # PBNJSON stub
           if ! find "$SYSROOT" -name "pbnjson_c.pc" 2>/dev/null | grep -q .; then
             mkdir -p "$SYSROOT/usr/lib/pkgconfig"
@@ -68,43 +68,27 @@ jobs:
             sed -i '2i return()' cmake/PackageWebOS.cmake
           fi
 
-      - name: Configure and NUCLEAR Patch Opus (Kill NEON)
+      # 🔥 CRITICAL: Remove Opus ARM/NEON sources BEFORE configure
+      - name: Remove Opus NEON sources (pre-configure)
         run: |
-          TOOLCHAIN_FILE=$(find "$SDK_DIR" -name "toolchainfile.cmake" | head -1)
-          mkdir -p build
-          
-          # 1. Elő-konfiguráció a forrás letöltéséhez
-          cmake -Bbuild \
-            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
-            -DTARGET_WEBOS=ON \
-            -DOPUS_WITH_NEON=OFF \
-            -DOPUS_USE_NEON=OFF \
-            -DCMAKE_BUILD_TYPE=$BUILD_TYPE || true
-
-          # 2. Opus RADIKÁLIS javítás: töröljük az összes ARM optimalizációt a build listából
-          OPUS_SRC="build/ext_opus-prefix/src/ext_opus"
+          OPUS_SRC=$(find . -type d -name "ext_opus" | head -1)
           if [ -d "$OPUS_SRC" ]; then
-            echo "Nuclear patching Opus: Removing ARM sources from CMakeLists..."
-            # Kitöröljük az ARM könyvtárakat a CMakeLists-ből, hogy meg se próbálja fordítani
-            find "$OPUS_SRC" -name "CMakeLists.txt" -exec sed -i '/arm/d' {} +
-            # Kényszerítjük a C definíciókat
-            find "$OPUS_SRC" -name "*.h" -exec sed -i 's/#define OPUS_ARM_ASM 1/#undef OPUS_ARM_ASM/g' {} +
-            find "$OPUS_SRC" -name "*.h" -exec sed -i 's/#define OPUS_ARM_MAY_HAVE_NEON 1/#undef OPUS_ARM_MAY_HAVE_NEON/g' {} +
-            # Fizikailag eltávolítjuk a fájlokat, amik a hibát okozták
+            echo "Removing ARM/NEON sources from Opus..."
             rm -rf "$OPUS_SRC/celt/arm"
             rm -rf "$OPUS_SRC/silk/arm"
           fi
 
-      - name: Final Build Configuration
+      - name: Configure build
         run: |
           TOOLCHAIN_FILE=$(find "$SDK_DIR" -name "toolchainfile.cmake" | head -1)
           cmake -Bbuild \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
             -DTARGET_WEBOS=ON \
-            -DOPUS_WITH_NEON=OFF \
-            -DOPUS_USE_NEON=OFF \
-            -DSDL_WAYLAND=ON \
-            -DSDL_VIDEO_DRIVER_WAYLAND=ON \
+            -DOPUS_DISABLE_INTRINSICS=ON \
+            -DOPUS_ARM_MAY_HAVE_NEON=0 \
+            -DOPUS_ARM_PRESUME_NEON=0 \
+            -DCMAKE_C_FLAGS="-mfpu=vfpv3-d16 -mfloat-abi=softfp" \
+            -DCMAKE_CXX_FLAGS="-mfpu=vfpv3-d16 -mfloat-abi=softfp" \
             -DCMAKE_BUILD_TYPE=$BUILD_TYPE
 
       - name: Build Project
