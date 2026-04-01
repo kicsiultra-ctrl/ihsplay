@@ -68,29 +68,38 @@ jobs:
             sed -i '2i return()' cmake/PackageWebOS.cmake
           fi
 
-      # 🔥 CRITICAL: Remove Opus ARM/NEON sources BEFORE configure
-      - name: Remove Opus NEON sources (pre-configure)
+      # 🔥 1) Trigger ext_opus download + configure (but not build)
+      - name: Pre-build: trigger ext_opus download
         run: |
-          OPUS_SRC=$(find . -type d -name "ext_opus" | head -1)
+          cmake -Bbuild .
+          cmake --build build --target ext_opus -- -j$(nproc) || true
+
+      # 🔥 2) Remove NEON sources after ext_opus is downloaded
+      - name: Remove Opus NEON sources
+        run: |
+          OPUS_SRC=$(find build -type d -name "ext_opus" | head -1)
+          echo "Opus source at: $OPUS_SRC"
           if [ -d "$OPUS_SRC" ]; then
-            echo "Removing ARM/NEON sources from Opus..."
-            rm -rf "$OPUS_SRC/celt/arm"
-            rm -rf "$OPUS_SRC/silk/arm"
+            echo "Removing ARM/NEON sources..."
+            rm -rf "$OPUS_SRC"/celt/arm
+            rm -rf "$OPUS_SRC"/silk/arm
+          else
+            echo "Opus source not found!"
+            find build -maxdepth 5 -type d -name "ext_opus"
           fi
 
+      # 🔥 3) Full configure (now NEON dirs are gone)
       - name: Configure build
         run: |
           TOOLCHAIN_FILE=$(find "$SDK_DIR" -name "toolchainfile.cmake" | head -1)
           cmake -Bbuild \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
             -DTARGET_WEBOS=ON \
-            -DOPUS_DISABLE_INTRINSICS=ON \
-            -DOPUS_ARM_MAY_HAVE_NEON=0 \
-            -DOPUS_ARM_PRESUME_NEON=0 \
             -DCMAKE_C_FLAGS="-mfpu=vfpv3-d16 -mfloat-abi=softfp" \
             -DCMAKE_CXX_FLAGS="-mfpu=vfpv3-d16 -mfloat-abi=softfp" \
             -DCMAKE_BUILD_TYPE=$BUILD_TYPE
 
+      # 🔥 4) Build everything (Opus now NEON-free)
       - name: Build Project
         run: |
           cmake --build build --parallel $(nproc)
