@@ -63,38 +63,41 @@ jobs:
 
       - name: Fix PackageWebOS.cmake Architecture Detection
         run: |
-          # Ez a sor "meghekkeljük" a projekt saját ellenőrző scriptjét.
-          # Bármit is találna ki, kényszerítjük, hogy az architektúra 'arm' legyen.
           if [ -f "cmake/PackageWebOS.cmake" ]; then
             sed -i '1i set(WEBOS_ARCH "arm")' cmake/PackageWebOS.cmake
             sed -i '2i return()' cmake/PackageWebOS.cmake
-            echo "Patched cmake/PackageWebOS.cmake to force ARM architecture."
           fi
 
-      - name: Configure and Patch External Projects
+      - name: Configure and NUCLEAR Patch Opus (Kill NEON)
         run: |
           TOOLCHAIN_FILE=$(find "$SDK_DIR" -name "toolchainfile.cmake" | head -1)
           mkdir -p build
           
-          # Első kör a függőségek letöltéséhez
+          # 1. Elő-konfiguráció a forrás letöltéséhez
           cmake -Bbuild \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
             -DTARGET_WEBOS=ON \
             -DOPUS_WITH_NEON=OFF \
             -DOPUS_USE_NEON=OFF \
-            -DSDL_WAYLAND=ON \
             -DCMAKE_BUILD_TYPE=$BUILD_TYPE || true
 
-          # Opus NEON javítás
+          # 2. Opus RADIKÁLIS javítás: töröljük az összes ARM optimalizációt a build listából
           OPUS_SRC="build/ext_opus-prefix/src/ext_opus"
           if [ -d "$OPUS_SRC" ]; then
-            echo "Hard-patching Opus to kill NEON..."
-            find "$OPUS_SRC" -name "*.h" -exec sed -i 's/#define OPUS_ARM_MAY_HAVE_NEON 1/#define OPUS_ARM_MAY_HAVE_NEON 0/g' {} +
-            find "$OPUS_SRC" -name "*.h" -exec sed -i 's/#define OPUS_ARM_HAS_NEON 1/#define OPUS_ARM_HAS_NEON 0/g' {} +
-            find build/ext_opus-prefix -name "*neon_intr.c" -delete
+            echo "Nuclear patching Opus: Removing ARM sources from CMakeLists..."
+            # Kitöröljük az ARM könyvtárakat a CMakeLists-ből, hogy meg se próbálja fordítani
+            find "$OPUS_SRC" -name "CMakeLists.txt" -exec sed -i '/arm/d' {} +
+            # Kényszerítjük a C definíciókat
+            find "$OPUS_SRC" -name "*.h" -exec sed -i 's/#define OPUS_ARM_ASM 1/#undef OPUS_ARM_ASM/g' {} +
+            find "$OPUS_SRC" -name "*.h" -exec sed -i 's/#define OPUS_ARM_MAY_HAVE_NEON 1/#undef OPUS_ARM_MAY_HAVE_NEON/g' {} +
+            # Fizikailag eltávolítjuk a fájlokat, amik a hibát okozták
+            rm -rf "$OPUS_SRC/celt/arm"
+            rm -rf "$OPUS_SRC/silk/arm"
           fi
 
-          # Végleges konfiguráció
+      - name: Final Build Configuration
+        run: |
+          TOOLCHAIN_FILE=$(find "$SDK_DIR" -name "toolchainfile.cmake" | head -1)
           cmake -Bbuild \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
             -DTARGET_WEBOS=ON \
