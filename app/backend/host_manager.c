@@ -112,8 +112,19 @@ void host_manager_session_request(host_manager_t *manager, const IHS_HostInfo *h
             .streamingEnable.audio = true,
             .streamingEnable.video = true,
             .streamingEnable.input = true,
-            .maxResolution.x = 1920,
-            .maxResolution.y = 1080,
+            /* --- MÓDOSÍTÁSOK ---
+             * 4K felbontás: a Steam a TV tényleges felbontásához igazítja magát,
+             * ha a TV 4K-t tud, ezt fogja küldeni. Ha a TV csak 1080p, automatikusan
+             * visszaesik oda. */
+            .maxResolution.x = 3840,
+            .maxResolution.y = 2160,
+            /* Max bitrate 100 Mbit/s LAN-hoz: ~96000 kbps (100*1000*0.96).
+             * Hagyunk ~4% overhead-et a hálózati protokolloknak.
+             * Megjegyzés: az ihslib ezt kbps-ben várja. */
+            .maxBitrate = 96000,
+            /* Big Picture letiltása: a Steam desktop módban indul,
+             * nem nyitja meg a Big Picture nézetet streamingkor. */
+            .streamingOptions.launchBigPicture = false,
     };
     IHS_ClientStreamingRequest(manager->client, host, &request);
 }
