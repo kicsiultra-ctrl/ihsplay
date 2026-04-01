@@ -14,8 +14,6 @@ env:
 jobs:
   build-webos:
     runs-on: ubuntu-latest
-    container:
-      image: ubuntu:20.04
 
     steps:
       - uses: actions/checkout@v4
@@ -24,40 +22,40 @@ jobs:
 
       - name: Install dependencies
         run: |
-          apt-get update
-          apt-get install -y cmake build-essential git curl tar gzip pkg-config \
-            libfreetype6-dev libfontconfig1-dev
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential pkg-config \
+            libfreetype6-dev libfontconfig1-dev jq curl
 
       - name: Download webOS NDK
         run: |
           cd /tmp
           NDK_URL=$(curl -s https://api.github.com/repos/openlgtv/buildroot-nc4/releases/latest | jq -r '.assets[] | select(.name | test("tar.gz")) | .browser_download_url' | head -1)
-          echo "Downloading from: $NDK_URL"
+          echo "Downloaded URL: $NDK_URL"
           curl -L "$NDK_URL" -o webos-sdk.tar.gz
           tar xzf webos-sdk.tar.gz
-          SDK_DIR=$(find /tmp -maxdepth 1 -type d -name "*buildroot*" | head -1)
+          SDK_DIR=$(find /tmp -maxdepth 1 -type d -name "*buildroot*" -o -name "*sdk*" | head -1)
           echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
-          ls -la "$SDK_DIR/" || true
+          echo "Contents:"
+          ls -la "$SDK_DIR/usr/share/buildroot/" || ls -la "$SDK_DIR/"
 
       - name: Build
-        env:
-          TOOLCHAIN_FILE: ${{ env.SDK_DIR }}/usr/share/buildroot/toolchainfile.cmake
         run: |
           mkdir -p build
+          TOOLCHAIN_FILE="${{ env.SDK_DIR }}/usr/share/buildroot/toolchainfile.cmake"
+          if [ ! -f "$TOOLCHAIN_FILE" ]; then
+            echo "Toolchain not found, searching..."
+            find ${{ env.SDK_DIR }} -name "toolchainfile.cmake" -o -name "*.cmake" | head -5
+            exit 1
+          fi
           cmake -Bbuild \
-            -DCMAKE_TOOLCHAIN_FILE="${TOOLCHAIN_FILE}" \
+            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
             -DTARGET_WEBOS=ON \
             -DBUILD_TESTS=OFF \
-            -DCMAKE_BUILD_TYPE=$BUILD_TYPE || cat build/CMakeFiles/CMakeOutput.log
+            -DCMAKE_BUILD_TYPE=$BUILD_TYPE
           cmake --build build --parallel $(nproc)
-
-      - name: Package IPK
-        run: |
-          cd build
-          cpack || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ihsplay-webos
-          path: build/*.ipk
+          path: build/
