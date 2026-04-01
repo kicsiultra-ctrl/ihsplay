@@ -1,6 +1,9 @@
 name: Release
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 env:
@@ -58,10 +61,7 @@ jobs:
           echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
           SYSROOT=$(find "$SDK_DIR" -maxdepth 3 -type d -name "sysroot" | head -1)
           echo "SYSROOT=$SYSROOT" >> $GITHUB_ENV
-          echo "Sysroot: $SYSROOT"
-          # pbnjson keresése
           find "$SYSROOT" -name "pbnjson*" 2>/dev/null && echo "pbnjson FOUND" || echo "pbnjson NOT FOUND"
-          # fake pbnjson.pc létrehozása ha nincs
           if ! find "$SYSROOT" -name "pbnjson_c.pc" 2>/dev/null | grep -q .; then
             echo "Creating fake pbnjson_c.pc..."
             mkdir -p "$SYSROOT/usr/lib/pkgconfig"
@@ -70,17 +70,14 @@ prefix=/usr
 exec_prefix=${prefix}
 libdir=${exec_prefix}/lib
 includedir=${prefix}/include
-
 Name: pbnjson_c
-Description: pbnjson C library (stub for build)
+Description: pbnjson C library
 Version: 1.0
 Libs: -L${libdir} -lpbnjson_c
 Cflags: -I${includedir}
 PKGEOF
-            # fake libpbnjson_c.so stub
             echo "void pbnjson_stub(){}" > /tmp/pbnjson_stub.c
             "$SDK_DIR/bin/arm-lgtv-linux-gnueabi-gcc" -shared -o "$SYSROOT/usr/lib/libpbnjson_c.so" /tmp/pbnjson_stub.c || true
-            # fake header
             mkdir -p "$SYSROOT/usr/include"
             touch "$SYSROOT/usr/include/pbnjson.h"
           fi
