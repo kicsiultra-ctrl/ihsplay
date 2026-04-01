@@ -65,7 +65,7 @@ jobs:
           TOOLCHAIN_FILE=$(find "$SDK_DIR" -name "toolchainfile.cmake" | head -1)
           mkdir -p build
           
-          # Hozzáadva: -DWEBOS_ARCH=arm, hogy ne akadjon el az architektúra felismerésnél
+          # Első konfiguráció (WEBOS_ARCH=arm hozzáadva)
           cmake -Bbuild \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
             -DTARGET_WEBOS=ON \
@@ -77,13 +77,13 @@ jobs:
 
           OPUS_SRC="build/ext_opus-prefix/src/ext_opus"
           if [ -d "$OPUS_SRC" ]; then
-            echo "Hard-patching Opus to kill NEON..."
+            echo "Hard-patching Opus for webOS ARM..."
             find "$OPUS_SRC" -name "*.h" -exec sed -i 's/#define OPUS_ARM_MAY_HAVE_NEON 1/#define OPUS_ARM_MAY_HAVE_NEON 0/g' {} +
             find "$OPUS_SRC" -name "*.h" -exec sed -i 's/#define OPUS_ARM_HAS_NEON 1/#define OPUS_ARM_HAS_NEON 0/g' {} +
             find build/ext_opus-prefix -name "*neon_intr.c" -delete
           fi
 
-          # Végleges konfiguráció a WEBOS_ARCH változóval
+          # Második, végleges konfiguráció
           cmake -Bbuild \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
             -DTARGET_WEBOS=ON \
