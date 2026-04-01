@@ -18,6 +18,11 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install Build Dependencies (Wayland focus)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y qemu-user-static binfmt-support libwayland-dev wayland-protocols pkg-config
+
       - name: Install ares-package (CLI)
         run: |
           ARES_URL=$(curl -s https://api.github.com/repos/webosbrew/ares-cli-rs/releases/latest \
@@ -27,14 +32,6 @@ jobs:
             | head -1)
           curl -L "$ARES_URL" -o /tmp/ares-package.deb
           sudo apt install -y /tmp/ares-package.deb
-
-      - name: Install qemu + aarch64 libs
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y qemu-user-static binfmt-support libc6-arm64-cross libstdc++6-arm64-cross libgcc-s1-arm64-cross
-          sudo update-binfmts --enable qemu-aarch64
-          sudo ln -sf /usr/aarch64-linux-gnu/lib/ld-linux-aarch64.so.1 /lib/ld-linux-aarch64.so.1 || true
-          sudo ln -sf /usr/aarch64-linux-gnu/lib /lib/aarch64-linux-gnu || true
 
       - name: Download webOS NDK
         run: |
@@ -54,25 +51,21 @@ jobs:
           echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
           SYSROOT=$(find "$SDK_DIR" -maxdepth 3 -type d -name "sysroot" | head -1)
           echo "SYSROOT=$SYSROOT" >> $GITHUB_ENV
+          
+          # PBNJSON stub készítése
           if ! find "$SYSROOT" -name "pbnjson_c.pc" 2>/dev/null | grep -q .; then
             mkdir -p "$SYSROOT/usr/lib/pkgconfig"
             printf 'prefix=/usr\nexec_prefix=${prefix}\nlibdir=${exec_prefix}/lib\nincludedir=${prefix}/include\nName: pbnjson_c\nDescription: pbnjson stub\nVersion: 1.0\nLibs: -L${libdir} -lpbnjson_c\nCflags: -I${includedir}\n' > "$SYSROOT/usr/lib/pkgconfig/pbnjson_c.pc"
             echo "void pbnjson_stub(){}" > /tmp/pbnjson_stub.c
             "$SDK_DIR/bin/arm-lgtv-linux-gnueabi-gcc" -shared -o "$SYSROOT/usr/lib/libpbnjson_c.so" /tmp/pbnjson_stub.c || true
-            mkdir -p "$SYSROOT/usr/include"
-            touch "$SYSROOT/usr/include/pbnjson.h"
           fi
 
-      - name: Fix PackageWebOS compiler name check
-        run: |
-          sed -i 's/arm-webos-linux-gnueabi-/arm-lgtv-linux-gnueabi-/g' cmake/PackageWebOS.cmake
-
-      - name: Configure and Patch Opus
+      - name: Configure and Patch External Projects
         run: |
           TOOLCHAIN_FILE=$(find "$SDK_DIR" -name "toolchainfile.cmake" | head -1)
           mkdir -p build
           
-          # 1. Először csak konfigurálunk, hogy a CMake letöltse az Opus-t
+          # 1. Elő-konfiguráció, hogy a CMake letöltse a külső függőségeket (SDL2, Opus stb.)
           cmake -Bbuild \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
             -DTARGET_WEBOS=ON \
@@ -80,30 +73,37 @@ jobs:
             -DOPUS_WITH_NEON=OFF \
             -DOPUS_USE_NEON=OFF \
             -DCMAKE_BUILD_TYPE=$BUILD_TYPE || true
-          
-          # 2. BRUTÁLIS PATCH: Töröljük az összes ARM/NEON fájlt az Opus forrásából, 
-          # hogy a build rendszer ne is próbálja meg fordítani őket.
-          echo "Patching Opus source to remove ARM/NEON files..."
-          find build/ext_opus-prefix -name "*arm*" -exec rm -rf {} +
-          find build/ext_opus-prefix -name "*neon*" -exec rm -rf {} +
-          
-          # 3. Újrakonfigurálunk, hogy a CMake észrevegye a változást
+
+          # 2. Opus NEON kiirtása a gyökerénél: kikapcsoljuk az ARM detektálást a fejlécben
+          OPUS_DIR="build/ext_opus-prefix/src/ext_opus"
+          if [ -d "$OPUS_DIR" ]; then
+            echo "Hard-patching Opus headers to disable ARM optimizations..."
+            # Letiltjuk az összes ARM asm-et és intrinsics-et a config fájlban
+            find "$OPUS_DIR" -name "config.h" -exec sed -i 's/#define OPUS_ARM_EXTERNAL_ASM 1/\/* #undef OPUS_ARM_EXTERNAL_ASM *\//g' {} +
+            find "$OPUS_DIR" -name "cpu_arm.h" -exec sed -i 's/#define OPUS_ARM_MAY_HAVE_NEON 1/#define OPUS_ARM_MAY_HAVE_NEON 0/g' {} +
+            # Fizikailag töröljük azokat a fájlokat, amik a hibát okozták
+            find build/ext_opus-prefix -name "*neon_intr.c" -delete
+          fi
+
+          # 3. SDL2 Wayland fix: Kényszerítjük a Wayland támogatást
+          # Az SDK sysroot-ját adjuk meg keresési útvonalnak
           cmake -Bbuild \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
             -DTARGET_WEBOS=ON \
-            -DBUILD_TESTS=OFF \
+            -DSDL_WAYLAND=ON \
+            -DSDL_VIDEO_DRIVER_WAYLAND=ON \
             -DOPUS_WITH_NEON=OFF \
             -DOPUS_USE_NEON=OFF \
             -DCMAKE_BUILD_TYPE=$BUILD_TYPE
 
-      - name: Build
+      - name: Build Project
         run: |
           cmake --build build --parallel $(nproc)
 
       - name: Package IPK
         run: |
           mkdir -p dist
-          # Megpróbáljuk megkeresni az app könyvtárat a builden belül
+          # Megkeressük hol jött létre az appinfo.json
           APP_PATH=$(find build -name "appinfo.json" -exec dirname {} \; | head -n 1)
           if [ -z "$APP_PATH" ]; then APP_PATH="build"; fi
           ares-package "$APP_PATH" -o dist/
