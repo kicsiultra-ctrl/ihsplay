@@ -22,9 +22,14 @@ jobs:
             | grep "ares-package.*\.deb" \
             | cut -d '"' -f 4 \
             | head -1)
-          echo "Downloading: $ARES_URL"
           curl -L "$ARES_URL" -o /tmp/ares-package.deb
           sudo apt install -y /tmp/ares-package.deb
+
+      - name: Install qemu-aarch64 (NDK emulációhoz)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y qemu-user-static binfmt-support
+          sudo update-binfmts --enable qemu-aarch64
 
       - name: Download webOS NDK
         run: |
@@ -44,25 +49,6 @@ jobs:
           echo "Found SDK dir: $SDK_DIR"
           "$SDK_DIR/relocate-sdk.sh"
           echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
-
-      - name: Debug compiler
-        run: |
-          GCC=$(find "$SDK_DIR/bin" -name "*gcc" | head -1)
-          echo "GCC path: $GCC"
-          file "$GCC"
-          readelf -l "$GCC" | grep interpreter || true
-
-      - name: Fix 32-bit ELF interpreter
-        run: |
-          sudo dpkg --add-architecture i386
-          sudo apt-get update -qq
-          sudo apt-get install -y \
-            libc6:i386 \
-            libstdc++6:i386 \
-            zlib1g:i386 \
-            lib32z1 \
-            lib32stdc++6 \
-            lib32gcc-s1
 
       - name: Build
         run: |
