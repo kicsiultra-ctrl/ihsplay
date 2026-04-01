@@ -31,12 +31,7 @@ jobs:
       - name: Install qemu + aarch64 libs
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y \
-            qemu-user-static \
-            binfmt-support \
-            libc6-arm64-cross \
-            libstdc++6-arm64-cross \
-            libgcc-s1-arm64-cross
+          sudo apt-get install -y qemu-user-static binfmt-support libc6-arm64-cross libstdc++6-arm64-cross libgcc-s1-arm64-cross
           sudo update-binfmts --enable qemu-aarch64
           sudo ln -sf /usr/aarch64-linux-gnu/lib/ld-linux-aarch64.so.1 /lib/ld-linux-aarch64.so.1 || true
           sudo ln -sf /usr/aarch64-linux-gnu/lib /lib/aarch64-linux-gnu || true
@@ -63,19 +58,8 @@ jobs:
           echo "SYSROOT=$SYSROOT" >> $GITHUB_ENV
           find "$SYSROOT" -name "pbnjson*" 2>/dev/null && echo "pbnjson FOUND" || echo "pbnjson NOT FOUND"
           if ! find "$SYSROOT" -name "pbnjson_c.pc" 2>/dev/null | grep -q .; then
-            echo "Creating fake pbnjson_c.pc..."
             mkdir -p "$SYSROOT/usr/lib/pkgconfig"
-            cat > "$SYSROOT/usr/lib/pkgconfig/pbnjson_c.pc" << 'PKGEOF'
-prefix=/usr
-exec_prefix=${prefix}
-libdir=${exec_prefix}/lib
-includedir=${prefix}/include
-Name: pbnjson_c
-Description: pbnjson C library
-Version: 1.0
-Libs: -L${libdir} -lpbnjson_c
-Cflags: -I${includedir}
-PKGEOF
+            printf 'prefix=/usr\nexec_prefix=${prefix}\nlibdir=${exec_prefix}/lib\nincludedir=${prefix}/include\nName: pbnjson_c\nDescription: pbnjson stub\nVersion: 1.0\nLibs: -L${libdir} -lpbnjson_c\nCflags: -I${includedir}\n' > "$SYSROOT/usr/lib/pkgconfig/pbnjson_c.pc"
             echo "void pbnjson_stub(){}" > /tmp/pbnjson_stub.c
             "$SDK_DIR/bin/arm-lgtv-linux-gnueabi-gcc" -shared -o "$SYSROOT/usr/lib/libpbnjson_c.so" /tmp/pbnjson_stub.c || true
             mkdir -p "$SYSROOT/usr/include"
@@ -86,8 +70,7 @@ PKGEOF
         run: |
           TOOLCHAIN_FILE=$(find "$SDK_DIR" -name "toolchainfile.cmake" | head -1)
           echo "Using toolchain: $TOOLCHAIN_FILE"
-          TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
-          ./tools/webos/easy_build.sh -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+          TOOLCHAIN_FILE="$TOOLCHAIN_FILE" ./tools/webos/easy_build.sh -DCMAKE_BUILD_TYPE=$BUILD_TYPE
 
       - name: Upload IPK artifact
         uses: actions/upload-artifact@v4
