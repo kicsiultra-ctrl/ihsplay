@@ -25,11 +25,17 @@ jobs:
           curl -L "$ARES_URL" -o /tmp/ares-package.deb
           sudo apt install -y /tmp/ares-package.deb
 
-      - name: Install qemu-aarch64 (NDK emulációhoz)
+      - name: Install qemu + aarch64 libc
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y qemu-user-static binfmt-support
+          sudo apt-get install -y \
+            qemu-user-static \
+            binfmt-support \
+            libc6-arm64-cross
           sudo update-binfmts --enable qemu-aarch64
+          # Symlink hogy a qemu megtalálja az aarch64 interpretert
+          sudo mkdir -p /lib/aarch64-linux-gnu
+          sudo ln -sf /usr/aarch64-linux-gnu/lib/ld-linux-aarch64.so.1 /lib/ld-linux-aarch64.so.1 || true
 
       - name: Download webOS NDK
         run: |
