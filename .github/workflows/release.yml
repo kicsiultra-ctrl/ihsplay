@@ -65,34 +65,29 @@ jobs:
 
       - name: Fix PackageWebOS compiler name check
         run: |
+          # Ez biztosítja, hogy a CMake felismerje az LG toolchaint webOS-ként
           sed -i 's/arm-webos-linux-gnueabi-/arm-lgtv-linux-gnueabi-/g' cmake/PackageWebOS.cmake
 
-      - name: Configure project (first pass to generate opus cmake files)
+      - name: Configure and Build
         run: |
           TOOLCHAIN_FILE=$(find "$SDK_DIR" -name "toolchainfile.cmake" | head -1)
-          mkdir -p build
-          cmake -Bbuild -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" -DTARGET_WEBOS=ON -DBUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=$BUILD_TYPE || true
-
-      - name: Patch opus NEON intrinsics
-        run: |
-          # Az opus neon fájlokat kizárjuk a fordításból
-          find build -name "*.cmake" -exec grep -l "neon_intr" {} \; | while read f; do
-            echo "Patching $f"
-            sed -i '/neon_intr/d' "$f"
-          done
-          # Alternatíva: az opus source fájlokban letiltjuk a NEON-t
-          find build -path "*ext_opus*" -name "*.c" -path "*neon*" 2>/dev/null | while read f; do
-            echo "Removing neon file: $f"
-            echo "" > "$f"
-          done
-
-      - name: Build
-        run: |
-          TOOLCHAIN_FILE=$(find "$SDK_DIR" -name "toolchainfile.cmake" | head -1)
-          TOOLCHAIN_FILE="$TOOLCHAIN_FILE" ./tools/webos/easy_build.sh -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+          
+          # Az OPUS_WITH_NEON=OFF és OPUS_USE_NEON=OFF flag kinyírja a hibás ARM optimalizációt
+          # Hozzáadtuk a -mfpu=vfp flaget is, ami biztonságosabb az öreg tévékhez
+          ./tools/webos/easy_build.sh \
+            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
+            -DTARGET_WEBOS=ON \
+            -DBUILD_TESTS=OFF \
+            -DOPUS_WITH_NEON=OFF \
+            -DOPUS_USE_NEON=OFF \
+            -DCMAKE_C_FLAGS="-mfpu=vfp -mfloat-abi=softfp" \
+            -DCMAKE_BUILD_TYPE=$BUILD_TYPE
 
       - name: Upload IPK artifact
         uses: actions/upload-artifact@v4
         with:
           name: ihsplay-webos
-          path: dist/*.ipk
+          # Az easy_build.sh általában a build mappába vagy egy dist mappába rakja a kész fájlt
+          path: |
+            build/*.ipk
+            *.ipk
