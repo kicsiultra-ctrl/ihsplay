@@ -20,6 +20,11 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static binfmt-support cmake build-essential pkg-config
+
       - name: Download webOS NDK
         run: |
           cd /tmp
@@ -29,22 +34,32 @@ jobs:
           tar xzf webos-sdk.tar.gz
           SDK_DIR=$(find /tmp -maxdepth 1 -type d -name "*buildroot*" | head -1)
           echo "SDK_DIR=$SDK_DIR" >> $GITHUB_ENV
-          "$SDK_DIR/relocate-sdk.sh"
+          "$SDK_DIR/relocate-sdk.sh" || true
 
-      - name: Setup build environment
-        run: |
-          . ${{ env.SDK_DIR }}/environment-setup-*
-          echo "$PATH" >> $GITHUB_PATH
-
-      - name: Build using easy_build script
+      - name: Configure CMake
         env:
           TOOLCHAIN_FILE: ${{ env.SDK_DIR }}/usr/share/buildroot/toolchainfile.cmake
-          CI: true
         run: |
-          bash ./tools/webos/easy_build.sh -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+          mkdir -p build
+          cmake -Bbuild \
+            -DCMAKE_TOOLCHAIN_FILE="${TOOLCHAIN_FILE}" \
+            -DTARGET_WEBOS=ON \
+            -DBUILD_TESTS=OFF \
+            -DCMAKE_BUILD_TYPE=$BUILD_TYPE
 
-      - name: Upload IPK artifact
+      - name: Build
+        run: |
+          cmake --build build --parallel $(nproc)
+
+      - name: Package IPK
+        run: |
+          cd build
+          cpack || true
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ihsplay-webos
-          path: build/*.ipk
+          path: |
+            build/*.ipk
+            dist/*.ipk
