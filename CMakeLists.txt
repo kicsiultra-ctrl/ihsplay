@@ -47,9 +47,9 @@ endif ()
 if (TARGET_WEBOS)
     message(STATUS "Disabling Opus NEON optimizations for webOS target")
 
-    # Disable NEON at compiler level
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mfpu=none -mfloat-abi=softfp")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mfpu=none -mfloat-abi=softfp")
+    # Use the weakest FPU mode supported by LG toolchain (NO NEON)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mfpu=vfpv3-d16 -mfloat-abi=softfp")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mfpu=vfpv3-d16 -mfloat-abi=softfp")
 
     # Disable Opus ARM optimizations
     set(OPUS_DISABLE_INTRINSICS ON CACHE BOOL "" FORCE)
